@@ -1,3 +1,12 @@
+# to-do:
+# check curtailment calc, rerun PV sweep
+# load/generation/TES profiles
+# 50 debt fraction 13 COE 30 ITC loan percentage of 0 base case for PV curtailment 
+# CAD engineering drawings of the assembly, subassemblies, and main parts 
+# final BOM (parts, estimate of price) in excel 
+# final report 
+
+
 from storage_stm import *
 from generation_stm import *
 from itertools import cycle, islice, chain
@@ -64,6 +73,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
         self.csp_systems_off_grid = [sys for sys in self.off_grid_systems if isinstance(sys,CSP_System)]
         self.bes_systems_off_grid = [sys for sys in self.off_grid_systems if isinstance(sys,BES_System)]
         self.tes_systems_off_grid = [sys for sys in self.off_grid_systems if isinstance(sys,TES_System_STM)]
+        self.e_sale = 0.055
 
         #saving pv power to system variable
         for sys in self.pv_systems:
@@ -410,7 +420,9 @@ class System: #need to set dict objects to exclude timeseries for metrics
                 #pv after all has been directed to pv, bes, or tes
                 df.loc[i+1,pv.name+'_to_grid_MWh_e'] = min(pv_remaining,max(0,poi_remaining))
                 # print(f'curatiled PV: {max([0,pv_remaining-max([0,poi_remaining])])}')
-                df.loc[i+1,pv.name+'_curtailed_MWh_e'] = max([0,pv_remaining-max([0,poi_remaining])])
+                # df.loc[i+1,pv.name+'_curtailed_MWh_e'] = max([0,pv_remaining-max([0,poi_remaining])])
+                df.loc[i+1,pv.name+'_curtailed_MWh_e'] = max([0,min(pv_remaining,max([0,poi_remaining]))]) # updated curtailment 
+                # print(pv_remaining-max([0,poi_remaining]))
                 df.loc[i+1,pv.site.name+'_POI_MW'] = pv_poi
 
             #load satisfaction by tes (2nd after pv)
@@ -733,6 +745,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
         annual_renewables = augment_array_np(annual_renewables, metrics['analysis_period'])*1000
         annual_fuel_cost = augment_array_np(annual_fuel_cost, metrics['analysis_period'])
         annual_grid = augment_array_np(annual_grid,metrics['analysis_period'])*1000*3.29*21.63/1000
+        annual_electricity_sales = (metrics['export_energy_MWh_e']*self.e_sale * 1000) # get curtailed PV, set e_sale price 
         
         total_energy_supplied = np.array(metrics['load_annual_MWh']) 
         annual_load = augment_array_np(total_energy_supplied, metrics['analysis_period'])*1000
@@ -742,6 +755,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
         NPV_htr_ARMO_N = npf.npv(metrics['WACC_r'], aug_htr[:metrics['analysis_period']])
         NPV_renewables_N = npf.npv(metrics['WACC_r'], annual_renewables[:metrics['analysis_period']])
         NPV_grid_N = npf.npv(metrics['WACC_r'], annual_grid[:metrics['analysis_period']])
+        NPV_electricity_sales_N = npf.npv(metrics['WACC_r'], annual_electricity_sales)  #********* 
         NPV_fuel_cost_N = npf.npv(metrics['WACC_r'], annual_fuel_cost[:metrics['analysis_period']])
         NPV_load_N = npf.npv(metrics['WACC_r'], annual_load[:metrics['analysis_period']])
     
@@ -757,8 +771,10 @@ class System: #need to set dict objects to exclude timeseries for metrics
         NPV_htr_ARMO_L = npf.npv(metrics['WACC_r'], aug_htr)
         NPV_renewables_L = npf.npv(metrics['WACC_r'], annual_renewables)
         NPV_grid_L = npf.npv(metrics['WACC_r'], annual_grid)
+        NPV_electricity_sales_L = npf.npv(metrics['WACC_r'], annual_electricity_sales)
         NPV_fuel_cost_L = npf.npv(metrics['WACC_r'], annual_fuel_cost)
-        
+    
+
         OM_NPV_arr = []
         for v in range(len(aug_batt)): 
             OM_esc = metrics['system_annual_OM_USD'] * ((1 + esc) ** v)
@@ -772,8 +788,9 @@ class System: #need to set dict objects to exclude timeseries for metrics
         annualized_ARMO = (NPV_batt_ARMO_N + NPV_htr_ARMO_N) * metrics['CRF']
         annualized_grid = NPV_grid_N * metrics['CRF']
         annualized_fuel = NPV_fuel_cost_N * metrics['CRF']
+        annualized_sales = NPV_electricity_sales_N * metrics['CRF'] *-1
 
-        annual_ARR = annualized_CAPEX + annualized_OM + annualized_ARMO + annualized_fuel
+        annual_ARR = annualized_CAPEX + annualized_OM + annualized_ARMO + annualized_fuel + annualized_sales
 
         # Calculate residual value for longer project life compared to analysis period (e.g. = 0 for n=L) 
         Rv = ((((1 + metrics['WACC_r']) ** metrics['analysis_period']) * ((1 - NPV_renewables_N / NPV_renewables_L) * (metrics['system_capex_USD'] * (1 - (tax * metrics['PVD']) * (1 - metrics['ITC'] / 2) - metrics['ITC'])) + (NPV_OM_N + NPV_htr_ARMO_N + NPV_batt_ARMO_N) -
@@ -782,8 +799,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
         cash_flow = np.ones(metrics['analysis_period']) * annual_ARR
         NPV_ARR = npf.npv(metrics['WACC_r'], cash_flow)
          
-         
-        #print(NPV_ARR,NPV_load_N)
+          
         if NPV_renewables_N == 0:
             metrics['LCOE_real_USD_kWh'] = (NPV_ARR) / NPV_load_N
             #print(NPV_ARR,NPV_fuel_cost_N,total_energy_supplied)

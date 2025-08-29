@@ -20,7 +20,6 @@ def estimate_min_insulation_thickness(
     durations = simHist[:,1] * 3600
     total_s   = durations.sum()
 
-
     inlet   = simHist[:,2]
     ambient = simHist[:,3]
 
