@@ -33,12 +33,3 @@ def exergy_stored_in_phase(PhaseFileName='TCF_Fig22-223.npz', MinUsefulTemp=400,
     endTime = time
 
     return exergy_MWhr, exergyCapacity_MWhr, endTime
-
-def material_library(material, temperature):
-    # Example material library function for 'rock'
-    if material == 'rock':
-        c = 800  # Specific heat capacity [J/kg-K]
-        k = 2.0  # Thermal conductivity [W/m-K]
-        mu = 0.0  # Dynamic viscosity [Pa-s], not used for solid
-        rho = 2600  # Density [kg/m^3]
-    return c, k, mu, rho

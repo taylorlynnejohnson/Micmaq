@@ -9,21 +9,36 @@ import numpy_financial as npf
 import multiprocess as mp
 from random import randint
 
-    
- # Constant TEA PARAMETERS
+# system_stm.py
+# vary financing assumptions, make heat map plot    
+# LCOE (x), multiple y axes  
+
 #L = 30 # [yrs] Operational Life
 #n = 30 # [yrs] Analysis period
-tax = 0.257 # [frac] State and federal tax rate
+tax = 0.257 # [frac] State and federal tax rate  # 
 inflation = 0.028 # [frac] Inflation rate
-#ITC = 0.5 # [frac] Ineternal tax credit #ADJUST TO REALISTIC VALUE
+ITC = 0.5 # [frac] Ineternal tax credit ########### vary [0, 0.3, 0.5]
 insurance = 0.004   #[frac] Insurance rate
 property_tax = 0.0084 # [frac] Property Tax Rate
 I = 0.08 # [frac] Nominal Interest rate 
-COE = 0.13 # [frac] Cost of equity 
-DF=0.5 #  [frac] Debt fraction
+COE = 0.13 # [frac] Cost of equity      ############ vary [.065, 0.13, 0.26]
+DF=0.5 #  [frac] Debt fraction          ############ vary [0, 0.5, 1]
 MACRS_yrs = 7 # [yrs] MACRS Depreciation Period 
 PVD = 0.73281282777303 # [frac] Present Value of Depreciation based on MACRS_yrs
 esc = 0.02 # [frac] Escalation rate 
+grant_frac = 0                           ############ vary [0, .1, .25]
+
+def set_finance_params(**kwargs):
+    allowed = {
+        'tax','inflation','insurance','property_tax',
+        'I','COE','DF','MACRS_yrs','PVD','esc','grant_frac'
+    }
+    for k, v in kwargs.items():
+        if k in allowed:
+            globals()[k] = v
+        else:
+            raise KeyError(f"Unknown finance param: {k}")
+
 
 class System: #need to set dict objects to exclude timeseries for metrics
   
@@ -394,6 +409,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
                 
                 #pv after all has been directed to pv, bes, or tes
                 df.loc[i+1,pv.name+'_to_grid_MWh_e'] = min(pv_remaining,max(0,poi_remaining))
+                # print(f'curatiled PV: {max([0,pv_remaining-max([0,poi_remaining])])}')
                 df.loc[i+1,pv.name+'_curtailed_MWh_e'] = max([0,pv_remaining-max([0,poi_remaining])])
                 df.loc[i+1,pv.site.name+'_POI_MW'] = pv_poi
 
@@ -666,11 +682,13 @@ class System: #need to set dict objects to exclude timeseries for metrics
          
         metrics['ITC'] = self.ITC
         metrics['analysis_period'] = self.analysis_period
-        metrics['WACC_n'] = DF*I*(1-tax) + (1-DF)*COE # use in LCOE calcs for "nominal" LCOE
-        metrics['WACC_r'] = ((1+metrics['WACC_n'])/(1+inflation))-1 # use in LCOE calcs for "real" LCOE
+        metrics['WACC_n'] = DF*I*(1-tax) + (1-DF)*COE # nom LCOE
+        metrics['WACC_r'] = ((1+metrics['WACC_n'])/(1+inflation))-1 # real
         metrics['PVD'] = MACRS_pvd(MACRS_yrs, metrics['WACC_n'])
         metrics['CRF'] = metrics['WACC_r']/(1-(1+metrics['WACC_r'])**(-metrics['analysis_period']))
         metrics['FCR'] =((metrics['CRF']* ((1 -(tax* metrics['PVD'])*(1-metrics['ITC']/2) - metrics['ITC'])) ) + property_tax + insurance )/ (1 - tax)
+        # pv_cost = sum(pv.capex_USD for pv in self.pv_systems) #***********************************************
+        # metrics['system_capex_USD'] -= pv_cost#***********************************************
 
          
         fuel_price_per_gal = 1.8 # $/gal
@@ -748,7 +766,7 @@ class System: #need to set dict objects to exclude timeseries for metrics
         OM_NPV_arr[0] = 0
         NPV_OM_L = npf.npv(metrics['WACC_r'], np.array(OM_NPV_arr))
     
-        annualized_CAPEX = metrics['system_capex_USD'] * metrics['FCR']
+        annualized_CAPEX = metrics['system_capex_USD'] * metrics['FCR'] * (1-grant_frac)
         #print(f"system capex {metrics['system_capex_USD']}")
         annualized_OM = NPV_OM_N * metrics['CRF']
         annualized_ARMO = (NPV_batt_ARMO_N + NPV_htr_ARMO_N) * metrics['CRF']
@@ -772,7 +790,6 @@ class System: #need to set dict objects to exclude timeseries for metrics
             #print(f'NPV_ARR: {NPV_ARR}')
             #print(f'NPV_load_N: {NPV_load_N}')
         else:
-    
             #metrics['LCOE_real_USD_kWh'] = (NPV_ARR - Rv) / NPV_renewables_N 
             metrics['LCOE_real_USD_kWh'] = (NPV_ARR) / NPV_load_N
          
@@ -790,39 +807,33 @@ class System: #need to set dict objects to exclude timeseries for metrics
         metrics['hourly_PV_to_load_MWh'] = df[[pv.name+'_to_load_MWh_e' for pv in self.pv_systems]].sum(axis=1).tolist()
         metrics['hourly_TES_to_load_MWh'] = df[[tes.name+'_to_load_MWh_e' for tes in self.tes_systems]].sum(axis=1).tolist()
         metrics['hourly_Fuel_to_load_MWh'] = df['fuel_to_load_MWh_th'].tolist()
-
-        #list systems of each type
+ 
         metrics['PV_systems'] = [pv.name for pv in self.pv_systems]
         metrics['CSP_systems'] = [csp.name for csp in self.csp_systems]
         metrics['BES_systems'] = [bes.name for bes in self.bes_systems]
         metrics['TES_systems'] = [tes.name for tes in self.tes_systems]
-
-        # Calculate number of years in timeseries
+ 
         metrics['years'] = len(df) / (24 * 365)
-
-        # Calculate CAPEX by component
+ 
         pv_capex = sum([getattr(pv, 'capex_USD', 0) for pv in self.pv_systems])
         csp_capex = sum([getattr(csp, 'capex_USD', 0) for csp in self.csp_systems])
         tes_capex = sum([getattr(tes, 'capex_USD', 0) for tes in self.tes_systems])
         bes_capex = sum([getattr(bes, 'capex_USD', 0) for bes in self.bes_systems])
-
-        # Add CAPEX details to metrics
+ 
         metrics['PV_capex_USD'] = pv_capex
         metrics['CSP_capex_USD'] = csp_capex
         metrics['TES_capex_USD'] = tes_capex
         metrics['BES_capex_USD'] = bes_capex
         metrics['system_capex_USD'] = pv_capex + csp_capex + tes_capex + bes_capex
-
-        # Print detailed CAPEX contributions
+ 
         #print(f"CAPEX Details:")
         #print(f"  PV CAPEX: {pv_capex}")
         #print(f"  CSP CAPEX: {csp_capex}")
         #print(f"  TES CAPEX: {tes_capex}")
 
-        #list systems that work off-grid
+        #systems that work off-grid
         metrics['off_grid_systems'] = [sys.name for sys in list(chain.from_iterable([self.pv_systems_off_grid, self.csp_systems_off_grid,self.bes_systems_off_grid, self.tes_systems_off_grid]))]
-
-        #calculate number of years in timeseries
+ 
         metrics['years'] = len(df)/(24*365)
 
         metrics['load_MWh'] = df.load_MW.sum()

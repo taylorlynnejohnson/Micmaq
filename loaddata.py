@@ -1,3 +1,4 @@
+#loaddat.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,6 +22,30 @@ def calculate_greenhouse_load(weather_files,
     rho_rock = 1600  
     k_wall = 0.0202  
     k_roof = 0.21    
+
+    # constants
+    stefan_boltzmann = 5.67e-8  # W/(m²·K⁴)
+
+    # Material thermal conductivities (W/(m·K))
+    k_super_wool   = 0.19   # Super‑wool insulation
+    k_sand         = 0.114  # Sand
+    k_fiberglass   = 0.04   # Fiberglass blanket
+    k_g_steel      = 50     # Galvanized steel tank
+
+    # Layer thicknesses (m)
+    # super wool thickness optimized in main  
+    thickness_sand        = 0.0254    # Sand
+    thickness_fiberglass  = 0.0047625 # Fiberglass
+    thickness_tank        = 0.0047625 # Steel tank
+
+    # Geometry
+    inner_diameter  = 2*0.2286   # central hole r (m)
+
+    # Surface parameters
+    emissivity      = 0.05   # Surface emissivity
+    h_convection    = 5    # Convective coefficient top annulus (W/(m²·K))
+
+
   
     volume = footprint * height          
     wall_area = 4 * np.sqrt(footprint) * height  
